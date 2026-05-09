@@ -223,6 +223,7 @@ impl FinalTransaction {
                 pst_input.issuance_value_amount = issue.issuance_value_amount;
                 pst_input.issuance_asset_entropy = issue.issuance_asset_entropy;
                 pst_input.issuance_inflation_keys = issue.issuance_inflation_keys;
+                pst_input.issuance_blinding_nonce = issue.issuance_blinding_nonce;
                 pst_input.blinded_issuance = issue.blinded_issuance;
             }
 
@@ -424,5 +425,30 @@ mod tests {
 
         assert_eq!(pst, expected_pst);
         assert_eq!(secrets, expected_secrets);
+    }
+
+    // Regression test: in Elements, a non-zero issuance_blinding_nonce is
+    // what marks an input as a reissuance rather than a new issuance, so
+    // dropping it during `extract_pst` silently turns reissuances into
+    // new issuances.
+    #[test]
+    fn extract_pst_preserves_issuance_blinding_nonce() {
+        let policy = dummy_asset_id(0xAA);
+        let entropy = [0x42u8; 32];
+        let blinding_nonce = [0x7Bu8; 32];
+
+        let utxo = explicit_utxo(0x01, 0, 5000, policy);
+        let partial_input = PartialInput::new(utxo);
+        let issuance =
+            IssuanceInput::new(1_000_000, entropy).with_blinding_nonce(blinding_nonce);
+
+        let mut ft = FinalTransaction::new();
+        ft.add_issuance_input(partial_input, issuance.clone(), RequiredSignature::None);
+
+        let (pst, _) = ft.extract_pst();
+
+        let expected_nonce = issuance.to_input().issuance_blinding_nonce;
+        assert!(expected_nonce.is_some(), "test setup should produce a Some nonce");
+        assert_eq!(pst.inputs()[0].issuance_blinding_nonce, expected_nonce);
     }
 }
