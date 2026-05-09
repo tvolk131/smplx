@@ -223,6 +223,7 @@ impl FinalTransaction {
                 pst_input.issuance_value_amount = issue.issuance_value_amount;
                 pst_input.issuance_asset_entropy = issue.issuance_asset_entropy;
                 pst_input.issuance_inflation_keys = issue.issuance_inflation_keys;
+                pst_input.issuance_blinding_nonce = issue.issuance_blinding_nonce;
                 pst_input.blinded_issuance = issue.blinded_issuance;
             }
 
