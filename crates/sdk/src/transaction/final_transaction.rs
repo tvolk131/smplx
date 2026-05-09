@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use simplicityhl::elements::pset::PartiallySignedTransaction;
+use simplicityhl::elements::pset::{Output as PsetOutput, PartiallySignedTransaction};
 use simplicityhl::elements::{
     AssetId, TxOutSecrets,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
@@ -22,10 +22,26 @@ pub struct FinalInput {
     pub required_sig: RequiredSignature,
 }
 
+/// A pre-built [`PsetOutput`] paired with the [`TxOutSecrets`] used to
+/// blind it. Callers that construct confidential outputs by hand
+/// (e.g. with fixed blinding factors that the explicit-only
+/// [`PartialOutput`] path can't express) inject them via
+/// [`FinalTransaction::add_raw_pset_output`]; the secrets are surfaced
+/// alongside input secrets so callers can balance
+/// [`PartiallySignedTransaction::blind_last`] correctly.
+#[derive(Clone)]
+pub struct RawPsetOutput {
+    pub output: PsetOutput,
+    pub secrets: Option<TxOutSecrets>,
+}
+
 #[derive(Clone)]
 pub struct FinalTransaction {
     inputs: Vec<FinalInput>,
     outputs: Vec<PartialOutput>,
+    /// Pre-built [`PsetOutput`]s that bypass the explicit-only
+    /// [`PartialOutput`] path. Appended to the PSET after `outputs`.
+    raw_outputs: Vec<RawPsetOutput>,
 }
 
 impl FinalTransaction {
@@ -34,6 +50,7 @@ impl FinalTransaction {
         Self {
             inputs: Vec::new(),
             outputs: Vec::new(),
+            raw_outputs: Vec::new(),
         }
     }
 
@@ -145,6 +162,41 @@ impl FinalTransaction {
         None
     }
 
+    /// Inject a fully-formed [`PsetOutput`] alongside the
+    /// [`TxOutSecrets`] used to construct it. Use this when the
+    /// caller needs to control blinding factors directly — e.g. the
+    /// covenant's deterministic-blinded reissuance UTXO whose ABF and
+    /// VBF are protocol constants rather than wallet-random. The
+    /// output is appended to the extracted PSET after all
+    /// [`PartialOutput`]s.
+    pub fn add_raw_pset_output(&mut self, output: PsetOutput, secrets: Option<TxOutSecrets>) {
+        self.raw_outputs.push(RawPsetOutput { output, secrets });
+    }
+
+    pub fn raw_outputs(&self) -> &[RawPsetOutput] {
+        &self.raw_outputs
+    }
+
+    pub fn n_raw_outputs(&self) -> usize {
+        self.raw_outputs.len()
+    }
+
+    /// Map from output index in the extracted PSET → [`TxOutSecrets`]
+    /// for any raw outputs that were registered with secrets. The
+    /// per-output analog of `extract_pst()`'s second return value;
+    /// callers feed it into their balancing logic before
+    /// [`PartiallySignedTransaction::blind_last`].
+    pub fn raw_output_secrets_for_pst(&self) -> HashMap<usize, TxOutSecrets> {
+        let mut map = HashMap::new();
+        let base = self.outputs.len();
+        for (i, raw) in self.raw_outputs.iter().enumerate() {
+            if let Some(secrets) = raw.secrets {
+                map.insert(base + i, secrets);
+            }
+        }
+        map
+    }
+
     pub fn inputs(&self) -> &[FinalInput] {
         &self.inputs
     }
@@ -247,6 +299,12 @@ impl FinalTransaction {
 
         self.outputs.iter().for_each(|el| {
             pst.add_output(el.to_output());
+        });
+        // Pre-built PsetOutputs (with caller-controlled blinding) come
+        // after the explicit PartialOutputs. Their secrets are surfaced
+        // separately via `raw_output_secrets_for_pst()`.
+        self.raw_outputs.iter().for_each(|el| {
+            pst.add_output(el.output.clone());
         });
 
         (pst, input_secrets)
@@ -425,5 +483,61 @@ mod tests {
 
         assert_eq!(pst, expected_pst);
         assert_eq!(secrets, expected_secrets);
+    }
+
+    #[test]
+    fn extract_pst_appends_raw_outputs_after_partial_outputs() {
+        let policy = dummy_asset_id(0xAA);
+        let other_asset = dummy_asset_id(0xBB);
+
+        // One explicit input + one explicit PartialOutput + one raw PsetOutput.
+        let utxo = explicit_utxo(0x01, 0, 5000, policy);
+        let partial_output = PartialOutput::new(Script::new(), 1000, policy);
+        let raw_output = simplicityhl::elements::pset::Output::new_explicit(
+            Script::new(),
+            42,
+            other_asset,
+            None,
+        );
+        let raw_secrets = TxOutSecrets::new(
+            other_asset,
+            AssetBlindingFactor::zero(),
+            42,
+            ValueBlindingFactor::zero(),
+        );
+
+        let mut ft = FinalTransaction::new();
+        ft.add_input(PartialInput::new(utxo), RequiredSignature::None);
+        ft.add_output(partial_output);
+        ft.add_raw_pset_output(raw_output.clone(), Some(raw_secrets));
+
+        let (pst, _input_secrets) = ft.extract_pst();
+        assert_eq!(pst.outputs().len(), 2, "raw output appended after partial");
+        assert_eq!(
+            pst.outputs()[1],
+            raw_output,
+            "raw output preserved verbatim",
+        );
+
+        // Output index 1 = `outputs.len()` (1) + raw_index (0).
+        let secrets_map = ft.raw_output_secrets_for_pst();
+        assert_eq!(secrets_map.len(), 1);
+        assert_eq!(secrets_map.get(&1), Some(&raw_secrets));
+    }
+
+    #[test]
+    fn raw_output_secrets_skips_outputs_without_secrets() {
+        let policy = dummy_asset_id(0xAA);
+        let utxo = explicit_utxo(0x01, 0, 5000, policy);
+        let raw_output =
+            simplicityhl::elements::pset::Output::new_explicit(Script::new(), 1, policy, None);
+
+        let mut ft = FinalTransaction::new();
+        ft.add_input(PartialInput::new(utxo), RequiredSignature::None);
+        ft.add_raw_pset_output(raw_output, None);
+
+        // No secrets registered — map is empty even though one raw output exists.
+        assert_eq!(ft.n_raw_outputs(), 1);
+        assert!(ft.raw_output_secrets_for_pst().is_empty());
     }
 }
