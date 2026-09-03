@@ -169,6 +169,12 @@ impl FinalTransaction {
         self.outputs.len()
     }
 
+    // True iff any output is marked for blinding, which is what gates
+    // `Signer::sign_tx` into running `blind_last`. The auto-added change in
+    // `estimate_tx` is confidential, so any wallet-funded tx (including one
+    // that spends a confidential input but otherwise has all-explicit
+    // outputs) gets a blinded balancing output — without it elementsd would
+    // reject a confidential-input spend with `bad-txns-in-ne-out`.
     pub fn needs_blinding(&self) -> bool {
         self.outputs.iter().any(|el| el.blinding_key.is_some())
     }

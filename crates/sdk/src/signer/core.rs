@@ -358,14 +358,21 @@ impl Signer {
         fee_rate: f32,
         available_delta: u64,
     ) -> Result<Estimate, SignerError> {
-        // estimate the tx fee with the change
-        // use this wpkh address as a change script
-        // TODO: this should be confidential
-        fee_tx.add_output(PartialOutput::new(
-            self.get_address().script_pubkey(),
-            PLACEHOLDER_FEE,
-            self.network.policy_asset(),
-        ));
+        // Estimate the tx fee with the change. The change goes back to our
+        // own wpkh script and is **confidential**: blinding the change keeps
+        // its amount private, and — crucially — gives the tx a blinded output
+        // so `needs_blinding()` is true and `sign_tx` runs `blind_last`. That
+        // balancing output is what lets the SDK spend a *confidential* input
+        // in a tx whose other outputs are explicit; without it elementsd
+        // rejects with `bad-txns-in-ne-out`.
+        fee_tx.add_output(
+            PartialOutput::new(
+                self.get_address().script_pubkey(),
+                PLACEHOLDER_FEE,
+                self.network.policy_asset(),
+            )
+            .with_blinding_key(self.get_blinding_public_key()),
+        );
 
         fee_tx.add_output(PartialOutput::new(
             Script::new(),
