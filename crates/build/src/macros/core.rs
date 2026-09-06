@@ -4,7 +4,7 @@ use proc_macro2::Span;
 use quote::quote;
 
 use simplicityhl::ast::ElementsJetHinter;
-use simplicityhl::{AbiMeta, TemplateProgram, UnstableFeatures};
+use simplicityhl::{AbiMeta, TemplateProgram, UnstableFeature, UnstableFeatures};
 
 use super::codegen::{
     GeneratedArgumentTokens, GeneratedWitnessTokens, SimfContractMeta, convert_contract_name_to_contract_module,
@@ -89,8 +89,10 @@ fn construct_argument_helpers(derived_meta: &SimfContractMeta) -> syn::Result<pr
 fn compile_simf(content: &SimfContent) -> Result<AbiMeta, Box<dyn Error>> {
     let program = content.content.as_str();
 
-    Ok(
-        TemplateProgram::new_with_unstable(program, &UnstableFeatures::all(), Box::new(ElementsJetHinter))?
-            .generate_abi_meta()?,
-    )
+    Ok(TemplateProgram::new_with_unstable(
+        program,
+        &UnstableFeatures::new([UnstableFeature::Imports]),
+        Box::new(ElementsJetHinter),
+    )?
+    .generate_abi_meta()?)
 }

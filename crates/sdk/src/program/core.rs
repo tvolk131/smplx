@@ -10,7 +10,7 @@ use simplicityhl::simplicity::bitcoin::{XOnlyPublicKey, secp256k1};
 use simplicityhl::simplicity::jet::elements::{ElementsEnv, ElementsUtxo};
 use simplicityhl::simplicity::{BitMachine, RedeemNode, Value, leaf_version};
 use simplicityhl::{Arguments, Parameters, WitnessTypes, WitnessValues};
-use simplicityhl::{CompiledProgram, UnstableFeatures};
+use simplicityhl::{CompiledProgram, UnstableFeature, UnstableFeatures};
 
 use crate::global::GlobalConfig;
 use crate::program::logger::ProgramLogger;
@@ -355,7 +355,7 @@ impl Program {
 
         let compiled = CompiledProgram::new_with_unstable(
             Arc::clone(&self.source),
-            &UnstableFeatures::all(),
+            &UnstableFeatures::new([UnstableFeature::Imports]),
             self.arguments.clone(),
             self.include_debug_symbols
                 .unwrap_or_else(GlobalConfig::get_include_debug_symbols),

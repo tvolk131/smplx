@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.11]
+
+- Upgraded SimplicityHL to v0.7.2. The accepted language surface is unchanged for now
+  (the new unstable `enums` feature is not enabled yet). Compilation errors are now
+  rendered as source-annotated diagnostics (via `ariadne`) instead of plain strings.
+  Compiled programs and CMRs are unaffected.
+
 ## [0.0.10]
 
 - Added `SECURITY.md` for security reporting guidelines.

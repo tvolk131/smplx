@@ -10,12 +10,12 @@ use quote::{format_ident, quote};
 use serde::Serialize;
 
 use simplicityhl::TemplateProgram;
-use simplicityhl::UnstableFeatures;
 use simplicityhl::ast::ElementsJetHinter;
 use simplicityhl::resolution::DependencyMap;
 use simplicityhl::resolution::ValidatedDeps;
 use simplicityhl::source::CanonPath;
 use simplicityhl::source::CanonSourceFile;
+use simplicityhl::{UnstableFeature, UnstableFeatures};
 
 use crate::contract_id::ContractId;
 use crate::macros::codegen::{
@@ -165,12 +165,16 @@ impl ArtifactsGenerator {
         let template = TemplateProgram::new_with_dep(
             canon_source_file.clone(),
             &dependency_map,
-            &UnstableFeatures::all(),
+            &UnstableFeatures::new([UnstableFeature::Imports]),
             Box::new(ElementsJetHinter),
         )
         .map_err(|diags| BuildError::DryRun(diags.to_string()))?;
-        let flattened = TemplateProgram::flatten(canon_source_file, &dependency_map, &UnstableFeatures::all())
-            .map_err(BuildError::Flattening)?;
+        let flattened = TemplateProgram::flatten(
+            canon_source_file,
+            &dependency_map,
+            &UnstableFeatures::new([UnstableFeature::Imports]),
+        )
+        .map_err(|diags| BuildError::Flattening(diags.to_string()))?;
 
         Ok(SourceEntry {
             cmr: ContractId::from_template(&template)?,
