@@ -78,7 +78,7 @@ jobs:
         run: |
           cd ${{ matrix.build-dir }}                     
           simplex test -v
-          simplex test --no-simplex -v metadata_cmr
+          simplex test --no-simplex -v metadata_cmr serde_roundtrip
 
   lint-checks:
     runs-on: ubuntu-latest
