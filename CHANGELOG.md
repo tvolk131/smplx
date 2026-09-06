@@ -8,6 +8,12 @@
 - Added support for SimplicityHL enums (the unstable `enums` language feature):
   - `include_simf!` now generates a Rust enum type for every enum reachable from the
     contract ABI, with full witness/argument construction and extraction support.
+  - Witness paths used by the signer can address enum payloads by variant name
+    (e.g. `&["Inherit"]` for a single-payload variant, `&["Pair", "1"]` for the second
+    payload of a multi-payload variant). Path segments are now interpreted against
+    the current node type, so malformed segments fail during traversal with
+    `UnsupportedPathType`/`UnknownEnumVariant` instead of at parse time; the
+    `WtnsWrappingError::ParsingError` variant was removed.
   - JSON deserialization of enum-typed witness/argument values goes through
     `UnresolvedValues`, resolving bare value strings (e.g. `"Mode::Single(7)"`)
     against the contract's declared types.

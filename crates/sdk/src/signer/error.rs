@@ -104,10 +104,6 @@ pub enum SignerError {
 /// Errors originating from manipulating witness paths and injecting values.
 #[derive(Debug, thiserror::Error)]
 pub enum WtnsWrappingError {
-    /// Error indicating a failure while parsing the provided witness path string.
-    #[error("Failed to parse path")]
-    ParsingError,
-
     /// Error pointing to the use of a path type that is currently not supported.
     #[error("Unsupported path type: {0}")]
     UnsupportedPathType(String),
@@ -123,4 +119,12 @@ pub enum WtnsWrappingError {
     /// Error indicating that a path traversal attempted to reach an undefined or mismatched Either branch.
     #[error("Path reached undefined branch of Either")]
     EitherBranchMismatch,
+
+    /// Error indicating that the witness path names an enum variant that the target enum type does not declare.
+    #[error("Unknown enum variant '{0}' for type {1}")]
+    UnknownEnumVariant(String, String),
+
+    /// Error indicating that the witness value holds a different enum variant than the one selected by the path.
+    #[error("Enum variant mismatch: path selected '{0}' but witness holds variant '{1}'")]
+    EnumVariantMismatch(String, String),
 }
