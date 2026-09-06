@@ -2,10 +2,19 @@
 
 ## [0.0.11]
 
-- Upgraded SimplicityHL to v0.7.2. The accepted language surface is unchanged for now
-  (the new unstable `enums` feature is not enabled yet). Compilation errors are now
-  rendered as source-annotated diagnostics (via `ariadne`) instead of plain strings.
-  Compiled programs and CMRs are unaffected.
+- Upgraded SimplicityHL to v0.7.2. Compilation errors are now rendered as
+  source-annotated diagnostics (via `ariadne`) instead of plain strings.
+  Compiled programs and CMRs of existing contracts are unaffected.
+- Added support for SimplicityHL enums (the unstable `enums` language feature):
+  - `include_simf!` now generates a Rust enum type for every enum reachable from the
+    contract ABI, with full witness/argument construction and extraction support.
+  - JSON deserialization of enum-typed witness/argument values goes through
+    `UnresolvedValues`, resolving bare value strings (e.g. `"Mode::Single(7)"`)
+    against the contract's declared types.
+  - `simplex build` embeds the original source for contracts that declare enums:
+    flattening wraps every file in a module, where enum declarations are not
+    allowed. Contracts mixing enums with imports are rejected with a clear error
+    until SimplicityHL lifts that restriction.
 
 ## [0.0.10]
 

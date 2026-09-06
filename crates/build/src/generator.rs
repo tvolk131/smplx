@@ -10,12 +10,13 @@ use quote::{format_ident, quote};
 use serde::Serialize;
 
 use simplicityhl::TemplateProgram;
+use simplicityhl::UnstableFeatures;
 use simplicityhl::ast::ElementsJetHinter;
+use simplicityhl::parse::ParseFromStr;
 use simplicityhl::resolution::DependencyMap;
 use simplicityhl::resolution::ValidatedDeps;
 use simplicityhl::source::CanonPath;
 use simplicityhl::source::CanonSourceFile;
-use simplicityhl::{UnstableFeature, UnstableFeatures};
 
 use crate::contract_id::ContractId;
 use crate::macros::codegen::{
@@ -158,27 +159,25 @@ impl ArtifactsGenerator {
         })?;
 
         let canon_source = CanonPath::canonicalize(source).map_err(BuildError::PathCanonicalization)?;
-        let content = fs::read_to_string(source)?;
-        let canon_source_file = CanonSourceFile::new(canon_source, Arc::from(content));
+        let content = Arc::from(fs::read_to_string(source)?);
+        let canon_source_file = CanonSourceFile::new(canon_source, Arc::clone(&content));
         let dependency_map = Self::build_dependency_map(validated_deps, parent_dir)?;
 
         let template = TemplateProgram::new_with_dep(
             canon_source_file.clone(),
             &dependency_map,
-            &UnstableFeatures::new([UnstableFeature::Imports]),
+            &UnstableFeatures::all(),
             Box::new(ElementsJetHinter),
         )
         .map_err(|diags| BuildError::DryRun(diags.to_string()))?;
-        let flattened = TemplateProgram::flatten(
-            canon_source_file,
-            &dependency_map,
-            &UnstableFeatures::new([UnstableFeature::Imports]),
-        )
-        .map_err(|diags| BuildError::Flattening(diags.to_string()))?;
+        let flattened = TemplateProgram::flatten(canon_source_file, &dependency_map, &UnstableFeatures::all())
+            .map_err(|diags| BuildError::Flattening(diags.to_string()))?;
+
+        let content = embeddable_content(&content, flattened)?;
 
         Ok(SourceEntry {
             cmr: ContractId::from_template(&template)?,
-            content: flattened,
+            content,
         })
     }
 
@@ -396,5 +395,131 @@ impl ArtifactsGenerator {
         };
 
         Ok(code)
+    }
+}
+
+/// Picks the source text to embed in build artifacts.
+///
+/// Flattening wraps every file in a `mod unit_N`, but enum declarations are
+/// only valid at a file's top level, so the flattened text of an
+/// enum-declaring contract cannot be re-parsed by `include_simf!`. Module
+/// wrapping is compile-transparent, so the original source is embedded
+/// instead whenever it compiles standalone; contracts that mix enums with
+/// imports are rejected until SimplicityHL lifts that restriction.
+///
+/// SimplicityHL currently rejects enum declarations in imported files before
+/// this helper runs, so checking the entry source for enums is sufficient.
+///
+/// TODO: Remove this workaround when SimplicityHL can flatten enum contracts
+/// into reparsable source, including contracts with imports.
+fn embeddable_content(original: &str, flattened: String) -> Result<String, BuildError> {
+    if !declares_enums(original) {
+        return Ok(flattened);
+    }
+
+    match TemplateProgram::new_with_unstable(
+        Arc::from(original),
+        &UnstableFeatures::all(),
+        Box::new(ElementsJetHinter),
+    ) {
+        Ok(_) => Ok(original.to_string()),
+        Err(_) => Err(BuildError::GenerationFailed(
+            "Contracts that declare enums cannot use imports yet: SimplicityHL flattening wraps files in modules, while enum declarations are only valid at a file's top level".to_string(),
+        )),
+    }
+}
+
+/// Returns `true` when the program declares any enum, at the top level or
+/// inside a module.
+fn declares_enums(source: &str) -> bool {
+    fn items_declare_enum(items: &[simplicityhl::parse::Item]) -> bool {
+        items.iter().any(|item| match item {
+            simplicityhl::parse::Item::EnumDeclaration(_) => true,
+            simplicityhl::parse::Item::Module(module) => items_declare_enum(module.items()),
+            _ => false,
+        })
+    }
+
+    let Ok(program) = simplicityhl::parse::Program::parse_from_str(source) else {
+        return false;
+    };
+
+    items_declare_enum(program.items())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_enum_declarations_in_imported_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.simf");
+        let dependency = dir.path().join("other.simf");
+        let helper = "pub fn check() { assert!(true); }";
+        let deps = simplicityhl::resolution::DependencyMapBuilder::new()
+            .validate_deps()
+            .unwrap();
+
+        fs::write(&entry, "use crate::other::check; fn main() { check(); }").unwrap();
+        fs::write(&dependency, helper).unwrap();
+        ArtifactsGenerator::process_content(&entry, &deps).unwrap();
+
+        fs::write(&dependency, format!("enum Mode {{ Off, }}\n{helper}")).unwrap();
+        let Err(BuildError::DryRun(error)) = ArtifactsGenerator::process_content(&entry, &deps) else {
+            panic!("Expected imported enums to be rejected before flattening; revisit embeddable_content");
+        };
+        assert!(
+            error.contains("enum `Mode` is declared in a dependency file"),
+            "Expected the upstream imported-enum restriction; revisit embeddable_content: {error}"
+        );
+    }
+
+    #[test]
+    fn embeds_flattened_source_for_contracts_without_enums() {
+        let original = "fn main() { assert!(true); }";
+        let flattened = "mod unit_0 { fn main() { assert!(true); } }".to_string();
+
+        assert_eq!(embeddable_content(original, flattened.clone()).unwrap(), flattened);
+    }
+
+    #[test]
+    fn embeds_original_source_for_enum_contracts() {
+        let original = "
+enum Mode {
+    Off,
+}
+
+fn main() {
+    match witness::MODE {
+        Mode::Off => assert!(true),
+    }
+}
+";
+        // The flattened text would wrap the enum in a module, where it is invalid.
+        let flattened = "mod unit_0 { enum Mode { Off } fn main() { ... } }".to_string();
+
+        assert_eq!(embeddable_content(original, flattened).unwrap(), original);
+    }
+
+    #[test]
+    fn rejects_enum_contracts_that_use_imports() {
+        let original = "
+enum Mode {
+    Off,
+}
+
+use other::check;
+
+fn main() {
+    check();
+    match witness::MODE {
+        Mode::Off => assert!(true),
+    }
+}
+";
+        let err = embeddable_content(original, String::new()).unwrap_err();
+
+        assert!(err.to_string().contains("cannot use imports"), "got: {err}");
     }
 }

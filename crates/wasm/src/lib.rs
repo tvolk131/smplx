@@ -14,7 +14,7 @@ use simplicityhl::ast::ElementsJetHinter;
 use simplicityhl::elements::hashes::Hash;
 use simplicityhl::elements::{self, Sequence};
 use simplicityhl::elements::{AssetId, ContractHash, LockTime, OutPoint, Script, TxOut, Txid};
-use simplicityhl::{Arguments, TemplateProgram, UnstableFeature, UnstableFeatures, WitnessValues};
+use simplicityhl::{Arguments, TemplateProgram, UnstableFeatures, WitnessValues};
 
 use smplx_sdk::program::{ArgumentsTrait, Program, WitnessTrait};
 use smplx_sdk::provider::SimplicityNetwork;
@@ -221,7 +221,7 @@ impl Covenant {
 pub fn covenant_parameter_types(source: &str) -> Result<String, JsError> {
     let template = TemplateProgram::new_with_unstable(
         Arc::<str>::from(source),
-        &UnstableFeatures::new([UnstableFeature::Imports]),
+        &UnstableFeatures::all(),
         Box::new(ElementsJetHinter),
     )
     .map_err(|e| JsError::new(&format!("Covenant does not compile: {e}")))?;

@@ -1,0 +1,52 @@
+enum Self {
+    Number(u32),
+}
+
+enum Self_ {
+    Flag(bool),
+}
+
+enum Self__ {
+    Number(u64),
+}
+
+enum move {
+    Wrapped(Self),
+}
+
+enum self {
+    Maybe(Option<move>),
+}
+
+enum super {
+    Items(List<Self__, 4>),
+}
+
+enum _ {
+    Number(u32),
+}
+
+enum __ {
+    Flag(bool),
+}
+
+enum ___ {
+    Number(u64),
+}
+
+fn main() {
+    let action: move = witness::ACTION;
+    let other: Self_ = witness::OTHER;
+    let lower: self = witness::LOWER;
+    let parent: super = witness::PARENT;
+    let action_arg: move = param::ACTION;
+    let other_arg: Self_ = param::OTHER;
+    let lower_arg: self = param::LOWER;
+    let parent_arg: super = param::PARENT;
+    let underscore: _ = witness::UNDERSCORE;
+    let double: __ = witness::DOUBLE;
+    let triple: ___ = witness::TRIPLE;
+    let underscore_arg: _ = param::UNDERSCORE;
+    let double_arg: __ = param::DOUBLE;
+    let triple_arg: ___ = param::TRIPLE;
+}

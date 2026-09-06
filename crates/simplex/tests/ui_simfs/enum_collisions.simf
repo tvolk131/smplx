@@ -1,0 +1,15 @@
+enum EnumCollisionsWitness {
+    Off,
+    Single(u32),
+}
+
+enum EnumCollisionsArguments {
+    Wrapped(EnumCollisionsWitness),
+}
+
+fn main() {
+    let action: EnumCollisionsWitness = witness::ACTION;
+    let wrapped: EnumCollisionsArguments = witness::WRAPPED;
+    let action_arg: EnumCollisionsWitness = param::ACTION;
+    let wrapped_arg: EnumCollisionsArguments = param::WRAPPED;
+}

@@ -1,0 +1,25 @@
+enum Action {
+    _(u32),
+    __,
+    ___(u64),
+    move(u32),
+    async,
+    dyn(u32, u64),
+    gen,
+    self,
+    self_,
+    self__,
+    Self,
+    super,
+}
+
+enum Wrapper {
+    yield(Option<Action>),
+}
+
+fn main() {
+    let action: Action = witness::ACTION;
+    let wrapped: Wrapper = witness::WRAPPED;
+    let action_arg: Action = param::ACTION;
+    let wrapped_arg: Wrapper = param::WRAPPED;
+}

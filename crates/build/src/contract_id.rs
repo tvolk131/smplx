@@ -55,6 +55,19 @@ impl ContractId {
                 Ok(Value::array(elements, element.as_ref().clone()))
             }
             TypeInner::List(element, bound) => Ok(Value::list(std::iter::empty(), element.as_ref().clone(), *bound)),
+            TypeInner::Enum(info) => {
+                let first_variant = info.variants().first().ok_or_else(|| {
+                    BuildError::DryRun(format!("Cannot build a default argument for empty enum type '{ty}'"))
+                })?;
+                let payload = first_variant
+                    .payload()
+                    .iter()
+                    .map(Self::default_value)
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Value::enum_variant(ty, first_variant.name(), payload)
+                    .ok_or_else(|| BuildError::DryRun(format!("Cannot build a default argument for enum type '{ty}'")))
+            }
             _ => Err(BuildError::DryRun(format!(
                 "Cannot build a default argument for unsupported type '{ty}'"
             ))),

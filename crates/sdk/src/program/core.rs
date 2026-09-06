@@ -10,7 +10,7 @@ use simplicityhl::simplicity::bitcoin::{XOnlyPublicKey, secp256k1};
 use simplicityhl::simplicity::jet::elements::{ElementsEnv, ElementsUtxo};
 use simplicityhl::simplicity::{BitMachine, RedeemNode, Value, leaf_version};
 use simplicityhl::{Arguments, Parameters, WitnessTypes, WitnessValues};
-use simplicityhl::{CompiledProgram, UnstableFeature, UnstableFeatures};
+use simplicityhl::{CompiledProgram, UnstableFeatures};
 
 use crate::global::GlobalConfig;
 use crate::program::logger::ProgramLogger;
@@ -355,7 +355,7 @@ impl Program {
 
         let compiled = CompiledProgram::new_with_unstable(
             Arc::clone(&self.source),
-            &UnstableFeatures::new([UnstableFeature::Imports]),
+            &UnstableFeatures::all(),
             self.arguments.clone(),
             self.include_debug_symbols
                 .unwrap_or_else(GlobalConfig::get_include_debug_symbols),
@@ -546,5 +546,81 @@ mod tests {
     fn diverges_from_a_balanced_tree_at_four_leaves() {
         assert_eq!(Program::taproot_leaf_depths(3), vec![2, 2, 1]);
         assert_ne!(Program::taproot_leaf_depths(4), vec![2, 2, 2, 2]);
+    }
+
+    // An enum-typed parameter and witness, spent through the full runtime
+    // path: compile, satisfy, taproot env, and Bit Machine execution.
+    #[test]
+    fn executes_enum_program() {
+        use std::collections::HashMap;
+
+        use simplicityhl::Value as HLValue;
+        use simplicityhl::str::{Identifier, WitnessName};
+        use simplicityhl::value::ValueConstructible;
+
+        use crate::program::collect_abi_types;
+
+        const ENUM_PROGRAM: &str = r"
+enum Mode {
+    Off,
+    Single(u32),
+    Pair(u32, u64),
+}
+
+fn use_u32(x: u32) {
+    assert!(true);
+}
+
+fn use_u64(x: u64) {
+    assert!(true);
+}
+
+fn check(mode: Mode) {
+    match mode {
+        Mode::Off => assert!(true),
+        Mode::Single(x: u32) => use_u32(x),
+        Mode::Pair(a: u32, b: u64) => { use_u32(a); use_u64(b); },
+    }
+}
+
+fn main() {
+    check(param::MODE);
+    check(witness::MODE);
+}
+";
+
+        #[derive(Clone)]
+        struct MapArguments(Arguments);
+
+        impl ArgumentsTrait for MapArguments {
+            fn build_arguments(&self) -> Arguments {
+                self.0.clone()
+            }
+        }
+
+        let abi = collect_abi_types(ENUM_PROGRAM);
+        let mode_ty = &abi.enum_types["Mode"];
+
+        let enum_value = |variant: &str, payload: Vec<HLValue>| {
+            HLValue::enum_variant(mode_ty, &Identifier::from_str_unchecked(variant), payload).unwrap()
+        };
+
+        let arguments = MapArguments(Arguments::from(HashMap::from([(
+            WitnessName::from_str_unchecked("MODE"),
+            enum_value("Single", vec![HLValue::u32(7)]),
+        )])));
+
+        let witness = WitnessValues::from(HashMap::from([(
+            WitnessName::from_str_unchecked("MODE"),
+            enum_value("Pair", vec![HLValue::u32(1), HLValue::u64(2)]),
+        )]));
+
+        let program = Program::new(ENUM_PROGRAM, &arguments);
+        let network = dummy_network();
+        let pst = make_pst_with_script(program.get_script_pubkey(&network));
+
+        program
+            .execute(&pst, &witness, 0, &network)
+            .expect("enum program executes");
     }
 }

@@ -1,0 +1,35 @@
+enum Mode {
+    Off,
+    Single(u32),
+    Pair(u32, u64),
+}
+
+enum Wrapper {
+    Plain,
+    Wrapped(Mode),
+    Maybe(Option<Mode>),
+    Bag([Mode; 2]),
+}
+
+enum Sealed {
+    Only(u64),
+}
+
+fn main() {
+    let mode: Mode = witness::MODE;
+    let wrapper: Wrapper = witness::WRAPPER;
+    let maybe: Option<Mode> = witness::MAYBE;
+    let either: Either<Mode, Wrapper> = witness::EITHER;
+    let tuple: (Mode, Wrapper) = witness::TUPLE;
+    let array: [Mode; 2] = witness::ARRAY;
+    let list: List<Mode, 4> = witness::LIST;
+    let sealed: Sealed = witness::SEALED;
+    let mode_arg: Mode = param::MODE;
+    let wrapper_arg: Wrapper = param::WRAPPER;
+    let maybe_arg: Option<Mode> = param::MAYBE;
+    let either_arg: Either<Mode, Wrapper> = param::EITHER;
+    let tuple_arg: (Mode, Wrapper) = param::TUPLE;
+    let array_arg: [Mode; 2] = param::ARRAY;
+    let list_arg: List<Mode, 4> = param::LIST;
+    let sealed_arg: Sealed = param::SEALED;
+}

@@ -43,9 +43,18 @@ impl SimfContractMeta {
     /// # Errors
     /// Returns a `syn::Result` with an error if the arguments or witness structure cannot be generated.
     pub fn try_from(simf_content: SimfContent, abi_meta: AbiMeta) -> syn::Result<Self> {
-        let args_struct = WitnessStruct::generate_args_struct(&simf_content.contract_name, &abi_meta.param_types)?;
-        let witness_struct =
+        let mut args_struct = WitnessStruct::generate_args_struct(&simf_content.contract_name, &abi_meta.param_types)?;
+        let mut witness_struct =
             WitnessStruct::generate_witness_struct(&simf_content.contract_name, &abi_meta.witness_types)?;
+        // Fields are converted separately, but escaped enum names must agree
+        // across the complete ABI, including names only reachable in another field.
+        RustType::resolve_enum_names(
+            args_struct
+                .witness_values
+                .iter_mut()
+                .chain(&mut witness_struct.witness_values)
+                .map(|field| &mut field.rust_type),
+        );
         let contract_source_const_name = convert_contract_name_to_contract_source_const(&simf_content.contract_name);
 
         Ok(SimfContractMeta {
@@ -55,6 +64,19 @@ impl SimfContractMeta {
             simf_content,
             abi_meta,
         })
+    }
+
+    /// Declarations of every enum type reachable from the contract's ABI,
+    /// deduplicated across the arguments and witness structs.
+    pub fn enum_declarations(&self) -> Vec<proc_macro2::TokenStream> {
+        let mut declarations: Vec<(String, proc_macro2::TokenStream)> = Vec::new();
+        for witness_struct in [&self.args_struct, &self.witness_struct] {
+            for field in &witness_struct.witness_values {
+                field.rust_type.collect_enum_declarations(&mut declarations);
+            }
+        }
+
+        declarations.into_iter().map(|(_, tokens)| tokens).collect()
     }
 }
 
@@ -85,7 +107,7 @@ impl WitnessField {
 
         quote! {
             (
-                simplex::simplicityhl::str::WitnessName::from_str_unchecked(#witness_name),
+                ::simplex::simplicityhl::str::WitnessName::from_str_unchecked(#witness_name),
                 #conversion
             )
         }
@@ -106,17 +128,20 @@ impl WitnessStruct {
             proc_macro2::TokenStream,
         ) = self.generate_from_args_conversion_with_param_name("args");
         let default_mapping: proc_macro2::TokenStream = self.generate_default_mapping();
+        let enum_helper_imports = self.enum_helper_imports();
+        let deserialize_impl = self.generate_deserialize_impl(false);
 
         Ok(GeneratedArgumentTokens {
             imports: quote! {
-                    use std::collections::HashMap;
-                    use simplex::simplicityhl::{Arguments, Value, ResolvedType};
-                    use simplex::simplicityhl::value::{UIntValue, ValueInner};
-                    use simplex::simplicityhl::num::{NonZeroPow2Usize, U256};
-                    use simplex::simplicityhl::str::WitnessName;
-                    use simplex::simplicityhl::types::TypeConstructible;
-                    use simplex::simplicityhl::value::ValueConstructible;
-                    use simplex::program::ArgumentsTrait;
+                    #enum_helper_imports
+                    use ::std::collections::HashMap;
+                    use ::simplex::simplicityhl::{Arguments, Value, ResolvedType};
+                    use ::simplex::simplicityhl::value::{UIntValue, ValueInner};
+                    use ::simplex::simplicityhl::num::{NonZeroPow2Usize, U256};
+                    use ::simplex::simplicityhl::str::{Identifier, WitnessName};
+                    use ::simplex::simplicityhl::types::TypeConstructible;
+                    use ::simplex::simplicityhl::value::ValueConstructible;
+                    use ::simplex::program::ArgumentsTrait;
             },
             struct_token_stream: quote! {
                 #generated_struct
@@ -136,36 +161,28 @@ impl WitnessStruct {
 
                 }
 
-                impl simplex::program::ArgumentsTrait for #struct_name {
+                impl ::simplex::program::ArgumentsTrait for #struct_name {
                     /// Build Simplicity arguments for contract instantiation.
                     #[must_use]
-                    fn build_arguments(&self) -> simplex::simplicityhl::Arguments {
-                        simplex::simplicityhl::Arguments::from(HashMap::from([
+                    fn build_arguments(&self) -> ::simplex::simplicityhl::Arguments {
+                        ::simplex::simplicityhl::Arguments::from(HashMap::from([
                             #(#tuples),*
                         ]))
                     }
                 }
 
-                impl simplex::serde::Serialize for #struct_name {
+                impl ::simplex::serde::Serialize for #struct_name {
                     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
                     where
-                    S: simplex::serde::Serializer,
+                    S: ::simplex::serde::Serializer,
                     {
                         self.build_arguments().serialize(serializer)
                     }
                 }
 
-                impl<'de> simplex::serde::Deserialize<'de> for #struct_name {
-                    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-                    where
-                    D: simplex::serde::Deserializer<'de>,
-                    {
-                        let x = simplex::simplicityhl::Arguments::deserialize(deserializer)?;
-                        Self::from_arguments(&x).map_err(simplex::serde::de::Error::custom)
-                    }
-                }
+                #deserialize_impl
 
-                impl core::default::Default for #struct_name {
+                impl ::core::default::Default for #struct_name {
                     fn default() -> Self {
                         #default_mapping
                     }
@@ -187,17 +204,20 @@ impl WitnessStruct {
             proc_macro2::TokenStream,
         ) = self.generate_from_args_conversion_with_param_name("witness");
         let default_mapping: proc_macro2::TokenStream = self.generate_default_mapping();
+        let enum_helper_imports = self.enum_helper_imports();
+        let deserialize_impl = self.generate_deserialize_impl(true);
 
         Ok(GeneratedWitnessTokens {
             imports: quote! {
-                    use std::collections::HashMap;
-                    use simplex::simplicityhl::{WitnessValues, Value, ResolvedType};
-                    use simplex::simplicityhl::value::{UIntValue, ValueInner};
-                    use simplex::simplicityhl::num::{NonZeroPow2Usize, U256};
-                    use simplex::simplicityhl::str::WitnessName;
-                    use simplex::simplicityhl::types::TypeConstructible;
-                    use simplex::simplicityhl::value::ValueConstructible;
-                    use simplex::program::WitnessTrait;
+                    #enum_helper_imports
+                    use ::std::collections::HashMap;
+                    use ::simplex::simplicityhl::{WitnessValues, Value, ResolvedType};
+                    use ::simplex::simplicityhl::value::{UIntValue, ValueInner};
+                    use ::simplex::simplicityhl::num::{NonZeroPow2Usize, U256};
+                    use ::simplex::simplicityhl::str::{Identifier, WitnessName};
+                    use ::simplex::simplicityhl::types::TypeConstructible;
+                    use ::simplex::simplicityhl::value::ValueConstructible;
+                    use ::simplex::program::WitnessTrait;
             },
             struct_token_stream: quote! {
                 #generated_struct
@@ -216,36 +236,28 @@ impl WitnessStruct {
                     }
                 }
 
-                impl simplex::program::WitnessTrait for #struct_name {
+                impl ::simplex::program::WitnessTrait for #struct_name {
                      /// Build Simplicity witness values for contract execution.
                     #[must_use]
-                    fn build_witness(&self) -> simplex::simplicityhl::WitnessValues {
-                        simplex::simplicityhl::WitnessValues::from(HashMap::from([
+                    fn build_witness(&self) -> ::simplex::simplicityhl::WitnessValues {
+                        ::simplex::simplicityhl::WitnessValues::from(HashMap::from([
                             #(#tuples),*
                         ]))
                     }
                 }
 
-                impl simplex::serde::Serialize for #struct_name {
+                impl ::simplex::serde::Serialize for #struct_name {
                     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
                     where
-                        S: simplex::serde::Serializer,
+                        S: ::simplex::serde::Serializer,
                     {
                         self.build_witness().serialize(serializer)
                     }
                 }
 
-                impl<'de> simplex::serde::Deserialize<'de> for #struct_name {
-                    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-                    where
-                        D: simplex::serde::Deserializer<'de>,
-                    {
-                        let x = simplex::simplicityhl::WitnessValues::deserialize(deserializer)?;
-                        Self::from_witness(&x).map_err(simplex::serde::de::Error::custom)
-                    }
-                }
+                #deserialize_impl
 
-                impl core::default::Default for #struct_name {
+                impl ::core::default::Default for #struct_name {
                     fn default() -> Self {
                         #default_mapping
                     }
@@ -277,6 +289,68 @@ impl WitnessStruct {
     ) -> syn::Result<Vec<WitnessField>> {
         iter.map(|(name, resolved_type)| WitnessField::new(name, resolved_type))
             .collect()
+    }
+
+    fn enum_helper_imports(&self) -> proc_macro2::TokenStream {
+        if self.witness_values.iter().any(|field| field.rust_type.contains_enum()) {
+            quote! {
+                use super::{abi_types, enum_type};
+                use ::simplex::simplicityhl::UnresolvedValues;
+            }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// Builds the serde `Deserialize` impl for the generated struct.
+    ///
+    /// When the ABI contains enums, deserialization goes through
+    /// `UnresolvedValues` and resolves bare value strings (for example
+    /// `"Mode::Single(7)"`) against the program's declared types, since
+    /// nominal enum values cannot be recovered without them. Otherwise the
+    /// plain typed map deserializes directly.
+    fn generate_deserialize_impl(&self, is_witness: bool) -> proc_macro2::TokenStream {
+        let struct_name = &self.struct_name;
+        let has_enums = self.witness_values.iter().any(|field| field.rust_type.contains_enum());
+
+        let (map_type, resolve_map, recover) = if is_witness {
+            (
+                quote! { ::simplex::simplicityhl::WitnessValues },
+                quote! { &abi_types().witness_types },
+                quote! { Self::from_witness(&x) },
+            )
+        } else {
+            (
+                quote! { ::simplex::simplicityhl::Arguments },
+                quote! { &abi_types().parameters },
+                quote! { Self::from_arguments(&x) },
+            )
+        };
+
+        let deserialize_map = if has_enums {
+            quote! {
+                let unresolved = UnresolvedValues::deserialize(deserializer)?;
+                let x: #map_type = unresolved
+                    .resolve(#resolve_map)
+                    .map_err(::simplex::serde::de::Error::custom)?;
+            }
+        } else {
+            quote! {
+                let x = #map_type::deserialize(deserializer)?;
+            }
+        };
+
+        quote! {
+            impl<'de> ::simplex::serde::Deserialize<'de> for #struct_name {
+                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                where
+                    D: ::simplex::serde::Deserializer<'de>,
+                {
+                    #deserialize_map
+                    #recover.map_err(::simplex::serde::de::Error::custom)
+                }
+            }
+        }
     }
 
     fn generate_struct_token_stream(&self) -> proc_macro2::TokenStream {

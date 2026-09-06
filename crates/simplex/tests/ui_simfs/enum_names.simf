@@ -1,0 +1,55 @@
+enum Value {
+    Off,
+    Single(u32),
+}
+
+enum Arguments {
+    Wrapped(Value),
+}
+
+enum WitnessValues {
+    Wrapped(Arguments),
+}
+
+enum Vec {
+    Items(List<WitnessValues, 4>),
+}
+
+enum Result {
+    Wrapped(Vec),
+}
+
+enum std {
+    Values([u32; 2]),
+}
+
+enum simplex {
+    Choice(Either<std, u64>),
+}
+
+enum core {
+    Wrapped(Option<simplex>),
+}
+
+enum str {
+    Empty,
+}
+
+fn main() {
+    let value: Value = witness::VALUE;
+    let args: Arguments = witness::ARGUMENT;
+    let values: WitnessValues = witness::VALUES;
+    let result: Result = witness::RESULT;
+    let items: List<Value, 4> = witness::ITEMS;
+    let action: simplex = witness::ACTION;
+    let wrapped: core = witness::WRAPPED;
+    let label: str = witness::LABEL;
+    let value_arg: Value = param::VALUE;
+    let args_arg: Arguments = param::ARGUMENT;
+    let values_arg: WitnessValues = param::VALUES;
+    let result_arg: Result = param::RESULT;
+    let items_arg: List<Value, 4> = param::ITEMS;
+    let action_arg: simplex = param::ACTION;
+    let wrapped_arg: core = param::WRAPPED;
+    let label_arg: str = param::LABEL;
+}
